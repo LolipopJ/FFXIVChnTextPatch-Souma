@@ -1,0 +1,3 @@
+[submodule "patch-tool"]
+	path = patch-tool
+	url = https://github.com/LolipopJ/FFXIVChnTextPatch-GP.git
