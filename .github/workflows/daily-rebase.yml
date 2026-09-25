@@ -1,0 +1,78 @@
+name: Daily Rebase from Upstream
+
+on:
+  schedule:
+    # 每天 UTC 13:00（北京时间 21:00）自动触发
+    - cron: '0 13 * * *'
+  workflow_dispatch: # 支持手动触发调试
+
+permissions:
+  contents: write
+
+env:
+  LOCAL_BRANCH: main
+  UPSTREAM_REPO: Souma-Sumire/FFXIVChnTextPatch-Souma
+  UPSTREAM_BRANCH: main
+
+jobs:
+  rebase:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout local branch with full history
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ env.LOCAL_BRANCH }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Configure Git identity
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream remote and fetch
+        run: |
+          git remote add upstream https://github.com/${{ env.UPSTREAM_REPO }}.git || true
+          git fetch upstream ${{ env.UPSTREAM_BRANCH }}
+
+      - name: Check if rebase is needed
+        id: check
+        run: |
+          LOCAL_HEAD=$(git rev-parse HEAD)
+          UPSTREAM_HEAD=$(git rev-parse upstream/${{ env.UPSTREAM_BRANCH }})
+          MERGE_BASE=$(git merge-base HEAD upstream/${{ env.UPSTREAM_BRANCH }})
+
+          # 如果本地已经包含上游所有提交，则无需 rebase
+          if [ "$MERGE_BASE" = "$UPSTREAM_HEAD" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "✅ Already up to date, skipping rebase."
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+            echo "🔄 Upstream has new commits, proceeding with rebase."
+          fi
+
+      - name: Rebase onto upstream/main
+        if: steps.check.outputs.skip != 'true'
+        id: rebase
+        run: |
+          echo "=== Before rebase ==="
+          git log --oneline -5
+          git rebase upstream/${{ env.UPSTREAM_BRANCH }}
+          echo "=== After rebase ==="
+          git log --oneline -5
+        continue-on-error: true
+
+      - name: Handle rebase conflict
+        if: steps.rebase.outcome == 'failure'
+        run: |
+          echo "::error::❌ Rebase failed due to conflicts! Manual intervention required."
+          echo "::error::Conflicting files:"
+          git diff --name-only --diff-filter=U || true
+          git rebase --abort
+          exit 1
+
+      - name: Force push rebased branch
+        if: steps.rebase.outcome == 'success'
+        run: |
+          git push --force-with-lease origin ${{ env.LOCAL_BRANCH }}
+          echo "✅ Successfully rebased and pushed to LolipopJ/FFXIVChnTextPatch-Souma!"
